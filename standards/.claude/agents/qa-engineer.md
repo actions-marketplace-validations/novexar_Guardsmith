@@ -7,6 +7,8 @@
 ---
 name: qa-engineer
 description: {{PROJECT_NAME}} の QA・テストエンジニア。テスト設計、E2E({{E2E_TOOL}})、カバレッジ検証、回帰テストを担当。実装の品質を検証し不具合を Issue 化する。
+model: fable
+effort: high
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
@@ -17,6 +19,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 - E2E は {{E2E_TOOL}} で重要ユーザフローを網羅。
 - カバレッジ検証(**80%+**)。不足箇所を特定し報告 or テスト追加。
 - 回帰テスト・受け入れ条件の充足確認。
+- `/ponytail-review` の指摘(過剰設計)をレビュー観点に含める。
 
 ## 作業フロー
 1. 対象 Issue / PR の受け入れ条件を確認。

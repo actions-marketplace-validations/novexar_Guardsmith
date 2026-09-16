@@ -78,6 +78,15 @@ rules:
       required: [name, description, tools]
       schema: { name: "^[a-z][a-z0-9-]*$" }
 
+  # --- agents モデル固定禁止 (docs/AGENTS.md のポリシー) ---
+  - id: agents/no-pinned-model
+    severity: warn
+    description: agent定義に日付付きmodel IDをハードコードしない(エイリアスで最新版に解決させる)
+    check: content-match
+    with:
+      path: .claude/agents/*.md
+      must_not: ['model:\s*"?claude-[a-z0-9-]+-20\d{6}']
+
   # --- skills frontmatter ---
   - id: skills/frontmatter
     severity: error
@@ -95,9 +104,18 @@ rules:
     with:
       # マスターは guardsmith リポジトリの standards/ サブディレクトリ。
       # loadPolicy がタグのtarballを取得・キャッシュし file: に解決してから検査する
-      source: github:novexar/guardsmith//standards@v0.2.1
+      source: github:novexar/guardsmith//standards@v0.5.0
       paths: [".claude/skills/**"]
       allow_sections: ["## PJ固有手順"]
+
+  # --- CI/CD 方針 (docs/CI_CD.md: CI はローカル Docker、Actions は main push の deploy のみ) ---
+  - id: ci/no-remote-test-workflows
+    severity: warn
+    description: GitHub Actions にテスト系ワークフローを置かない(CI はローカル Docker。Actions は deploy のみ)
+    check: content-match
+    with:
+      path: .github/workflows/*.yml
+      must_not: ['\bpull_request\b', "pnpm test", "npm test", "pytest", "vitest"]
 
   # --- セキュリティ ---
   - id: security/no-secrets-in-context
