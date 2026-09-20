@@ -1,35 +1,55 @@
 # Contributing to GuardSmith
 
-GuardSmith への貢献に興味を持っていただきありがとうございます。
+**English** | [日本語](CONTRIBUTING.ja.md)
 
-## 開発環境
+Thank you for your interest in contributing to GuardSmith.
+
+## Development environment
 
 - Node.js >= 20 / pnpm >= 10
 
 ```bash
 pnpm install
 pnpm test              # vitest
-pnpm test:coverage     # カバレッジ (80% ゲート)
+pnpm test:coverage     # coverage (80% gate)
 pnpm typecheck         # tsc strict
 pnpm lint              # eslint + prettier --check
-pnpm guard lint        # セルフ検査 (dogfooding)
+pnpm guard lint        # self-check (dogfooding)
 ```
 
-## 変更の流れ
+## Contribution flow
 
-1. Issue を立てて方針を合意する(小さな修正は PR 直行で可)
-2. `feature/<topic>` または `fix/<topic>` ブランチを作成
-3. テストを先に書く(TDD)。カバレッジ 80% 以上を維持
-4. Conventional Commits 形式でコミット(`feat:` / `fix:` / `docs:` / `test:` / `chore:` など)
-5. PR を作成。CI(lint / typecheck / test / guard lint)が全て GREEN であること
+1. Open an issue to agree on the approach first (small fixes can go straight to a PR)
+2. Branch off `develop` as `feature/<topic>` or `fix/<topic>` (`feature/*` → `develop` → `main`)
+3. Write tests first (TDD) and keep coverage at 80% or higher
+4. Commit in Conventional Commits format (`feat:` / `fix:` / `docs:` / `test:` / `chore:`, etc.)
+5. Open a PR. CI (lint / typecheck / test / guard lint) must be all GREEN
 
-## ルール追加・変更時の注意
+## CI (hybrid model)
 
-- `presets/baseline.yaml` のルールを変更する場合、対応する `standards/` テンプレートと
-  テストフィクスチャを必ず同期させてください
-- `standards/` は配布マスターです。`{{PLACEHOLDER}}` や `gen:` コメントは意図的なものです
-- リモート参照(`github:`)はタグ固定が必須です。この制約を緩める変更は受け付けません
+GuardSmith uses a hybrid CI setup: maintainers run CI locally in Docker (`make ci`), while
+GitHub Actions runs only for external PRs from forks (PRs from branches in the same
+repository are skipped). This reconciles the policy of not consuming Actions minutes for
+day-to-day CI with the need, as public OSS, to keep automated verification of external PRs.
 
-## ライセンス
+- **`make ci` (Docker-based local CI) must pass before opening a PR.** It runs lint /
+  typecheck / test:coverage / guard lint in one go inside a Docker container and writes
+  result JSON to `.guardsmith/ci-results/` (requires GNU make + bash + Docker; on Windows,
+  run from Git Bash / WSL)
+- **External contributors (PRs from forks)**: GitHub Actions (External PR CI) runs the same
+  checks automatically, so you can submit a PR without a Docker environment (running
+  `pnpm lint` and friends locally beforehand is still recommended)
+- GitHub Actions does not run for maintainers' own PRs (branches within the same repository)
 
-貢献されたコードは [Apache-2.0](LICENSE) の下でライセンスされます。
+## Notes on adding or changing rules
+
+- When changing rules in `presets/baseline.yaml`, always keep the corresponding `standards/`
+  templates and test fixtures in sync
+- `standards/` is the distribution master. `{{PLACEHOLDER}}` markers and `gen:` comments are
+  intentional
+- Remote references (`github:`) require tag pinning. Changes that loosen this constraint
+  will not be accepted
+
+## License
+
+Contributed code is licensed under [Apache-2.0](LICENSE).

@@ -19,7 +19,7 @@ React / FastAPI
 ## よく使うコマンド
 npm test
 ## ブランチ戦略
-feature-<issue>
+<type>/<issue番号>-<slug>(例: feature/142-preset-loader)
 ## PJ固有ルール
 なし
 <!-- standards: novexar/guardsmith v0.1.0 -->
@@ -30,7 +30,7 @@ function buildGood(root: string) {
   write(
     root,
     ".claude/agents/backend-engineer.md",
-    "---\nname: backend-engineer\ndescription: API実装担当\ntools: Read, Write, Bash\n---\n作業フロー\n",
+    "---\nname: backend-engineer\ndescription: API実装担当\nmodel: sonnet\ntools: Read, Write, Bash\n---\n作業フロー\n",
   );
   write(
     root,
@@ -44,6 +44,14 @@ function buildGood(root: string) {
   );
   write(root, "docs/overview.md", "docs\n");
   write(root, ".claude/settings.json", `{"permissions":{"allow":["npm test"]}}`);
+  // GuardSmith ランタイム成果物の除外(hygiene/guardsmith-artifacts-ignored の正例)
+  write(root, ".gitignore", "node_modules/\n.guardsmith/\n.claude/settings.local.json\n");
+  // deploy.yml 相当(push main のみ・テスト系ステップ無し)は ci/no-remote-test-workflows に検出されない
+  write(
+    root,
+    ".github/workflows/deploy.yml",
+    "name: Deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo deploy placeholder\n",
+  );
 }
 
 function buildBad(root: string) {
@@ -60,15 +68,23 @@ function buildBad(root: string) {
     ".claude/agents/backend-engineer.md",
     "<!-- gen: 具体化せよ -->\n---\nname: backend-engineer\ndescription: {{BE_STACK}}担当\n---\n",
   );
-  // agent: frontmatterは正しいがtools欠落(frontmatterチェック単体の検証用)
+  // agent: frontmatterは正しいがtools欠落(frontmatterチェック単体の検証用)+ 日付付きmodel ID固定
   write(
     root,
     ".claude/agents/db-engineer.md",
-    "---\nname: db-engineer\ndescription: DB担当\n---\n作業フロー\n",
+    "---\nname: db-engineer\ndescription: DB担当\nmodel: claude-sonnet-5-20260101\n---\n作業フロー\n",
   );
   // シークレット混入 + 必須skill欠落
   write(root, ".claude/notes.md", 'api_key = "sk1234567890abcdefghij"\n');
   rmSync(join(root, ".claude/skills/finish-task"), { recursive: true });
+  // リモートCI違反: pull_request トリガー + テストコマンド(ci/no-remote-test-workflows)
+  write(
+    root,
+    ".github/workflows/test.yml",
+    "name: Test\non:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm test\n",
+  );
+  // GuardSmith ランタイム成果物の除外行が両方無い(hygiene/guardsmith-artifacts-ignored)
+  write(root, ".gitignore", "node_modules/\ndist/\n");
 }
 
 let goodRoot: string;
@@ -97,6 +113,20 @@ describe("baseline: good fixture", () => {
 
   it("has zero warn (drift/skills-sync is info-skipped until github: fetch)", () => {
     expect(good.stats.warn).toBe(0);
+  });
+
+  it("does not flag alias model (agents/no-pinned-model)", () => {
+    expect(good.findings.filter((f) => f.ruleId === "agents/no-pinned-model")).toHaveLength(0);
+  });
+
+  it("does not flag deploy-only workflow (ci/no-remote-test-workflows)", () => {
+    expect(good.findings.filter((f) => f.ruleId === "ci/no-remote-test-workflows")).toHaveLength(0);
+  });
+
+  it("does not flag .gitignore with both exclusion lines (hygiene/guardsmith-artifacts-ignored)", () => {
+    expect(
+      good.findings.filter((f) => f.ruleId === "hygiene/guardsmith-artifacts-ignored"),
+    ).toHaveLength(0);
   });
 });
 
@@ -145,12 +175,82 @@ describe("baseline: bad fixture", () => {
     ).toBe(true);
   });
 
+  it("detects pinned model id in agent", () => {
+    expect(
+      bad.findings.some(
+        (f) => f.ruleId === "agents/no-pinned-model" && f.file?.includes("db-engineer"),
+      ),
+    ).toBe(true);
+    expect(ids().filter((i) => i === "agents/no-pinned-model")).toHaveLength(1);
+  });
+
   it("detects secret", () => {
     expect(ids()).toContain("security/no-secrets-in-context");
   });
 
+  it("detects remote test workflow (pull_request trigger + test command)", () => {
+    const hits = bad.findings.filter(
+      (f) => f.ruleId === "ci/no-remote-test-workflows" && f.file?.includes("test.yml"),
+    );
+    // \bpull_request\b / pnpm test / npm test(pnpm test の部分一致)の3パターンが検出される
+    // (deploy.yml 相当が検出されないことは good 側で検証)
+    expect(hits).toHaveLength(3);
+    expect(hits.every((f) => f.severity === "warn")).toBe(true);
+  });
+
   it("detects missing standards version", () => {
     expect(ids()).toContain("claude-md/standards-version");
+  });
+
+  it("detects .gitignore missing both artifact exclusions (hygiene/guardsmith-artifacts-ignored)", () => {
+    const hits = bad.findings.filter(
+      (f) => f.ruleId === "hygiene/guardsmith-artifacts-ignored" && !f.suppressed,
+    );
+    // must の2パターン(.guardsmith/ と .claude/settings.local.json)がそれぞれ warn として検出される
+    expect(hits).toHaveLength(2);
+    expect(hits.every((f) => f.severity === "warn")).toBe(true);
+  });
+});
+
+describe("hygiene/guardsmith-artifacts-ignored", () => {
+  it("info-skips when .gitignore itself is absent (file-exists の責務)", async () => {
+    const root = makeFixtureDir("gs-no-gitignore");
+    try {
+      const result = await runLint(policy, root);
+      const hits = result.findings.filter(
+        (f) => f.ruleId === "hygiene/guardsmith-artifacts-ignored",
+      );
+      expect(hits).toHaveLength(1);
+      expect(hits[0].severity).toBe("info");
+      expect(hits[0].message).toContain("content-match skipped");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("security/dangerous-permissions", () => {
+  it("does not error on settings.json without a permissions key (guard new 配布物と同形)", async () => {
+    const root = makeFixtureDir("gs-settings-noperm");
+    try {
+      write(
+        root,
+        ".claude/settings.json",
+        JSON.stringify({
+          $schema: "https://json.schemastore.org/claude-code-settings.json",
+          extraKnownMarketplaces: {
+            ponytail: { source: { source: "github", repo: "DietrichGebert/ponytail" } },
+          },
+          enabledPlugins: { "ponytail@ponytail": true },
+        }),
+      );
+      const result = await runLint(policy, root);
+      expect(result.findings.filter((f) => f.ruleId === "security/dangerous-permissions")).toEqual(
+        [],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -46,6 +46,7 @@
 | Lint | {{FE_LINT}} | {{BE_LINT}} |
 | テスト | {{FE_TEST}} | {{BE_TEST}} |
 | ビルド | {{FE_BUILD}} | — |
+| CI(Docker) | `make ci`(ルートで実行。詳細: @docs/CI_CD.md) | 同左 |
 
 ## ブランチ戦略
 <!-- gen: モノレポなら develop-<system> 階層を含む標準形、単一システムなら main/develop/feature の3層。詳細は docs/BRANCHING_STRATEGY.md に生成し、ここには図と昇格ルールのみ -->
@@ -54,7 +55,9 @@ main                     ← 本番。直接 push 禁止。
 └── develop              ← 統合ブランチ。
     └── {{BRANCH_TREE}}
 ```
-- feature/bug → 起点ブランチの PR は担当エンジニア Agent が作成。昇格 PR は PM のみ。`main` へのマージはオーナー確認後。
+- 作業ブランチは `<type>/<issue番号>-<slug>`(type: feature | bug | chore。例: `feature/142-preset-loader`)。外部ツールがブランチ名から Issue 番号を逆引きする契約。
+- Issue は `.github/ISSUE_TEMPLATE` の構造(背景 / 受入基準 / スコープ外)に従って起票する。
+- 作業ブランチ → 起点ブランチの PR は担当エンジニア Agent が作成。昇格 PR は PM のみ。`main` へのマージはオーナー確認後。
 
 ## PJ固有ルール
 <!-- gen: デザインシステム、外部API制約、コンプライアンス要件など、このPJだけの制約を箇条書き。無ければ「特記事項なし」 -->

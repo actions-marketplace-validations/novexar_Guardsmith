@@ -29,14 +29,36 @@ describe("guard new", () => {
     expect(existsSync(join(dest, ".gitignore"))).toBe(true);
     expect(existsSync(join(dest, "gitignore"))).toBe(false);
 
+    // Issue テンプレートは feature / bug / chore の3種(旧 task.md は配布しない)
+    expect(existsSync(join(dest, ".github/ISSUE_TEMPLATE/feature.md"))).toBe(true);
+    expect(existsSync(join(dest, ".github/ISSUE_TEMPLATE/bug.md"))).toBe(true);
+    expect(existsSync(join(dest, ".github/ISSUE_TEMPLATE/chore.md"))).toBe(true);
+    expect(existsSync(join(dest, ".github/ISSUE_TEMPLATE/task.md"))).toBe(false);
+
+    // 外部ツール連携用の HTTP hooks サンプルが展開され、JSON として妥当である
+    const hooksExamplePath = join(dest, ".claude/settings.local.json.example");
+    expect(existsSync(hooksExamplePath)).toBe(true);
+    const hooksExample = JSON.parse(readFileSync(hooksExamplePath, "utf8")) as {
+      hooks?: Record<string, unknown>;
+    };
+    expect(hooksExample.hooks?.["SessionStart"]).toBeDefined();
+
+    // ponytail 導入用の共有 settings.json が展開され、JSON として妥当である
+    const settingsPath = join(dest, ".claude/settings.json");
+    expect(existsSync(settingsPath)).toBe(true);
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      enabledPlugins?: Record<string, boolean>;
+    };
+    expect(settings.enabledPlugins?.["ponytail@ponytail"]).toBe(true);
+
     // standards バージョンコメントが guardsmith 版へ書き換わっている
     const claudeMd = readFileSync(join(dest, "CLAUDE.md"), "utf8");
-    expect(claudeMd).toContain("<!-- standards: novexar/guardsmith v0.2.1 -->");
+    expect(claudeMd).toContain("<!-- standards: novexar/guardsmith v0.5.1 -->");
     expect(claudeMd).not.toContain("standards: novexar/claude-standards");
 
     // タグ固定のリモート参照を持つ guard.policy.yaml が生成され、スキーマを通る
     const policyRaw = readFileSync(join(dest, "guard.policy.yaml"), "utf8");
-    expect(policyRaw).toContain("github:novexar/guardsmith//presets/baseline.yaml@v0.2.1");
+    expect(policyRaw).toContain("github:novexar/guardsmith//presets/baseline.yaml@v0.5.1");
     const parsed = parsePolicy(parse(policyRaw));
     expect(parsed.ok).toBe(true);
   });
