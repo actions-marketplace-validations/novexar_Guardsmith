@@ -42,23 +42,39 @@ npx @guardsmith/cli init
 # 契約見出しの破壊、資格情報の混入、drift など)
 npx @guardsmith/cli lint
 
-# 標準マスターからの乖離(drift)を表示し、復元する
-npx @guardsmith/cli sync           # dry-run
-npx @guardsmith/cli sync --write   # 復元(PJ 固有セクションは保全)
+# 標準更新で何が変わるかを表示し、取り込む
+npx @guardsmith/cli sync                # dry-run(衝突があれば exit 1)
+npx @guardsmith/cli bump v0.7.0         # 適用 + extends タグと vars ファイルの更新
+
+# guardsmith.vars.yaml がまだ無い既存 PJ は先に生成する
+npx @guardsmith/cli sync --init-vars
 
 # ルールの説明 / バージョン表示
 npx @guardsmith/cli explain claude-md/thin-diff
 npx @guardsmith/cli version
 ```
 
-| コマンド                  | 主なフラグ                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------- |
-| `guard new <dir>`         | —                                                                                              |
-| `guard init`              | —                                                                                              |
-| `guard lint`              | `--root`、`--policy`、`--format console\|sarif\|json`、`--out`、`--no-cache`、`--no-gitignore` |
-| `guard sync`              | `--root`、`--policy`、`--write`、`--no-cache`、`--no-gitignore`                                |
-| `guard explain <rule-id>` | —                                                                                              |
-| `guard version`           | —                                                                                              |
+| コマンド                  | 主なフラグ                                                                                           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `guard new <dir>`         | —                                                                                                    |
+| `guard init`              | —                                                                                                    |
+| `guard lint`              | `--root`、`--policy`、`--format console\|sarif\|json`、`--out`、`--no-cache`、`--no-gitignore`       |
+| `guard sync`              | `--root`、`--policy`、`--write`、`--no-cache`、`--no-gitignore`、`--conflict-markers`、`--init-vars` |
+| `guard bump <tag>`        | `--root`、`--policy`、`--repo <owner>/<repo>`、`--no-cache`、`--no-gitignore`、`--conflict-markers`  |
+| `guard explain <rule-id>` | —                                                                                                    |
+| `guard version`           | —                                                                                                    |
+
+`guard sync` / `guard bump` は標準リリースを **3-way マージ**で取り込みます。PJ が乗っている
+タグのマスターが base、新タグのマスターが theirs、PJ リポジトリが ours なので、PJ 固有の記述は
+そのまま残ります。PJ の編集と標準の変更が重なったファイルは**衝突**として報告され、無変更のまま
+残ります(`--conflict-markers` を付けると `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` マーカー
+入りで書き出します)。どちらも終了コードは、衝突なしで `0`、1 ファイルでも衝突すれば `1`
+(このとき `guard bump` は policy を含め何も書きません)、実行エラーは `2` です。
+
+マージが読む PJ のプレースホルダ置換値は `guardsmith.vars.yaml`(PJ ルート・コミット対象・
+秘密情報は書かない)にあります。`guard new` が雛形を生成し、既存 PJ は
+`guard sync --init-vars` で生成します。`drift3` ルールを持たないポリシーでは、従来どおり
+`guard sync --write` が節単位で復元します。
 
 各 check は「**コミットされうるファイル**」を対象にします。既定で `.gitignore`(入れ子も)に
 追従し、`.git/` は常に除外するため、`secret-scan` は `.claude/settings.local.json` の中身を
@@ -87,9 +103,9 @@ npx @guardsmith/cli version
 version: 1
 target: claude-code
 extends:
-  - github:novexar/guardsmith//presets/baseline.yaml@v0.6.0 # タグ固定は必須
+  - github:novexar/guardsmith//presets/baseline.yaml@v0.7.0 # タグ固定は必須
   # フロントエンドを持つプロジェクトはさらに:
-  # - github:novexar/guardsmith//presets/frontend.yaml@v0.6.0
+  # - github:novexar/guardsmith//presets/frontend.yaml@v0.7.0
 ignore: [] # 全走査から除外する glob(extends 間で連結される)
 rules: [] # 追加・上書き(同じ id の再定義=上書き)
 exemptions: [] # 期限付き例外(reason + approved_by + expires 必須)
@@ -106,7 +122,7 @@ GitHub の外に出ることはありません。期限切れの例外(exemption
 workflow に 1 行追加:
 
 ```yaml
-- uses: novexar/Guardsmith@v0.6.0
+- uses: novexar/Guardsmith@v0.7.0
 ```
 
 違反した PR はサマリコメントと SARIF レポート付きで失敗します。閉域網などの環境では

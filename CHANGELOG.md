@@ -2,6 +2,105 @@
 
 **English** | [日本語](CHANGELOG.ja.md)
 
+## v0.7.0 (2026-09-24)
+
+A release about **keeping a project in step with the standards it was generated from**.
+Until now a project could be measured against the master, but there was no way to take a
+master change into a repository that had already been filled in — the placeholders were
+gone. `guardsmith.vars.yaml` records what each placeholder was replaced with, which makes
+a real three-way merge possible: `guard sync` and the new `guard bump` apply the
+standards' change while the project's own edits stay put. For the catch-up steps for
+existing projects, see docs/migration/v0.7.0.md.
+
+### Added
+
+- `guardsmith.vars.yaml` at the project root (committed): `version` / `standards` (the tag
+  the project was generated from, pinned as `vX.Y.Z`) / `vars` (placeholder key → value).
+  It is the only record of what `{{PROJECT_NAME}}` and friends became, and the input to
+  every three-way operation
+- `guard sync` gains a **3-way mode**, used when the effective policy has a `drift3` rule.
+  The old master (at the `standards` tag) and the new master (at the source's tag) are both
+  normalized with the project's `vars`, and the difference between them is merged into the
+  project: project edits are kept, only the standards' change is applied. Section mode
+  (`check: drift`) keeps working exactly as before, in the same run
+- `guard sync --init-vars`: infers `guardsmith.vars.yaml` for a project initialized before
+  v0.7.0, by matching each placeholder position in the old master against the project's
+  corresponding line. Values it cannot determine become `TODO`, ambiguous ones take the
+  most frequent candidate with every candidate listed in a comment, and anything matching a
+  secret pattern is dropped to `TODO` rather than written down
+- `guard sync --conflict-markers` / `guard bump --conflict-markers`: write the conflicting
+  files with `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` markers instead of leaving them
+  untouched. The exit code stays 1 and the standards tag is not advanced
+- `guard bump <tag> [--repo <owner>/<repo>]`: rewrites the pinned tags in
+  `guard.policy.yaml` (plain text replacement — comments, indentation and key order are
+  preserved), applies the standards' change through the same 3-way plan, **also runs the
+  section-level sync for `.claude/skills/**` against the master at the new tag**, and
+  advances the `standards` tag and the `CLAUDE.md` stamp — one command, nothing left to run
+  afterwards. On a conflict it writes **nothing** and exits 1
+- New check `drift3` (`with: { source, paths }`): reports a standards change that has not
+  been applied yet at the rule's severity — `standards v0.6.0 → v0.7.0 not applied
+(N files, applies cleanly) — run: guard bump v0.7.0` — and one that needs hands as `info`.
+  Without `guardsmith.vars.yaml` it falls back to the section comparison and points at
+  `--init-vars`
+- baseline: `drift/standards-sync` (warn, `check: drift3`) covering `CLAUDE.md`,
+  `DESIGN.md`, `docs/**/*.md` and `.claude/agents/**/*.md`. `drift/skills-sync` stays on
+  section mode — one release does not change the meaning of both
+- baseline `security/no-secrets-in-context` also scans `guardsmith.vars.yaml`, which is
+  committed and would otherwise be a quiet leak path
+- `guard new` writes a `guardsmith.vars.yaml` skeleton (`standards: "v0.7.0"`, empty
+  `vars`) for init-project to fill in
+
+### Changed
+
+- The project is never rolled back silently. When `guardsmith.vars.yaml` is at a **newer**
+  tag than the policy distributes — a bump whose policy write failed, or a reverted or
+  hand-edited policy — a plain three-way would run "new → old" and undo the standards.
+  `guard sync` and `guard bump` now refuse with exit 2 and print no plan, `guard lint`
+  reports it as a `warn`, and `--allow-downgrade` is required to go back on purpose
+- `guard bump <tag>` resolves the **`extends` refs** of the target repository at the new tag
+  as well, so a baseline that widened a rule's `paths` is honoured by the same bump instead
+  of only from the next run
+- Only the standards repository named by `--repo` (default `novexar/guardsmith`) is
+  followed. `guardsmith.vars.yaml` records a single `standards` tag, so a `drift3` rule
+  pointing at another repository — a Layer 2 overlay such as
+  `github:novexar/guardsmith-private//standards@v3.0.0` — keeps its own pinned tag, is
+  reported with a warning, and is never resolved against yours. For the same reason a
+  policy may carry at most one `drift3` rule for the target repository
+- Writes are refused while the project's values are incomplete: `guard sync --write` and
+  `guard bump` exit 2 when a `vars` value is still `TODO` or a placeholder used by the
+  standards is missing. A dry-run and `guard lint` still report it as `info` and name the
+  keys — only writing is blocked, because an unfilled value would otherwise be written into
+  the project verbatim
+- Nothing is half-applied: `guard sync --write` builds the 3-way plan first, so a conflict
+  suppresses the section-level restore as well, and everything a write touches — merged
+  files, section restores, `guardsmith.vars.yaml` and the `CLAUDE.md` stamp — goes out as a
+  single batch that is staged first and rolled back if committing any one file fails
+- `paths` patterns may no longer contain a `..` segment, and every write is confined to the
+  project root at run time. `guard sync` writes to the paths a glob matched, and a policy
+  can be inherited from a remote `extends`, so a pattern like `../**/*.md` was a way to
+  write outside the repository
+
+- Standards / init-project: the interview results are now **recorded** in
+  `guardsmith.vars.yaml` as they are applied, and the "following the master" procedure is
+  `guard bump <tag>` instead of a manual diff
+- Bumped remote-reference tags and generated-artifact stamps to v0.7.0 (baseline drift
+  sources / policy generated by `guard new` / docs examples / the Action's `release-tag`
+  default)
+- npm: `@guardsmith/core` / `@guardsmith/cli` 0.6.0 (the Action's `cli-version` default is
+  also 0.6.0)
+
+### Breaking
+
+- **`guard sync` exits 1 when there are conflicts.** It always returned 0 before, so a CI
+  job running `guard sync` without `--write` as a check now fails when the standards and
+  the project touched the same lines. That is the intent — the alternative is drifting
+  further apart in silence — but it has to be handled before bumping the tag
+- **baseline v0.7.0 requires `@guardsmith/cli` 0.6.0 or newer.** It contains the `drift3`
+  check, and an older CLI rejects it as an unknown check under its strict schema. Upgrade
+  the CLI before bumping the `extends` tag
+- **`guard new` produces one more file.** `guardsmith.vars.yaml` is part of the generated
+  project and is meant to be committed; init-project fills it in
+
 ## v0.6.0 (2026-09-24)
 
 A release about **how much context stays resident** and **who checks quality**. `guard lint`
