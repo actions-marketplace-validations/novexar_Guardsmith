@@ -39,8 +39,13 @@ export const ExtendsRef = z.union([
 ]);
 
 /**
- * drift の source: github:owner/repo[//path]@tag (タグ固定必須) または file:<dir> (ローカル開発用)
- * //path はマスターがリポジトリのサブディレクトリにある場合に指定(例: guardsmith の standards/)
+ * drift / drift3 の source: github:owner/repo[//path]@tag (タグ固定必須) または
+ * file:<dir> (ローカル開発用)。
+ * //path はマスターがリポジトリのサブディレクトリにある場合に指定(例: guardsmith の standards/)。
+ *
+ * drift3 は旧タグ・新タグの 2 本のマスターを必要とする。ローカル開発用の file: では
+ * `file:<dir>[@<tag>]` と書き、`<dir>` に含まれる `{tag}` をタグで置換して両方を得る
+ * (例: `file:./fixtures/{tag}/standards@v0.7.0`)。詳細は resolver.ts を参照。
  */
 export const DriftSource = z.union([
   z
@@ -53,7 +58,24 @@ export const DriftSource = z.union([
 ]);
 
 const NonEmpty = z.string().min(1);
-const Paths = z.array(NonEmpty).min(1);
+
+/**
+ * 走査パターンに `..` セグメントを許さない。
+ * `guard sync` はマッチしたパスへ**書き込む**ため、`../**\/*.md` のようなパターンは
+ * リポジトリ外への書き込み経路になる。policy は remote extends から継承されうるので、
+ * 上流の差し替えで PJ 外を書かれないようスキーマの段階で落とす。
+ * 先頭 `!` の否定パターンは除外指定なので `!` を外して判定する。
+ */
+function hasParentSegment(pattern: string): boolean {
+  const body = pattern.startsWith("!") ? pattern.slice(1) : pattern;
+  return body.split(/[\\/]/).includes("..");
+}
+
+const PathPattern = NonEmpty.refine((p) => !hasParentSegment(p), {
+  message: "path pattern must not contain a '..' segment (it would escape the repository root)",
+});
+
+const Paths = z.array(PathPattern).min(1);
 
 /* ---------- ルール共通フィールド ---------- */
 
@@ -192,6 +214,26 @@ const Drift = z
   })
   .strict();
 
+/**
+ * drift3: vars 駆動の 3-way 追随検査。
+ *
+ * 既存 `drift`(節単位・マスターが正)とは `with` の意味がまったく違うため、同じ check に
+ * 同居させず別 check にしている(§1.2 U1)。`allow_sections` は 3-way では不要なので
+ * **持たせない**(誤用防止)。旧 CLI は未知 check として明確に拒否する。
+ */
+const Drift3 = z
+  .object({
+    ...RULE_BASE,
+    check: z.literal("drift3"),
+    with: z
+      .object({
+        source: DriftSource,
+        paths: Paths,
+      })
+      .strict(),
+  })
+  .strict();
+
 const SecretScan = z
   .object({
     ...RULE_BASE,
@@ -216,6 +258,7 @@ export const Rule = z.discriminatedUnion("check", [
   Frontmatter,
   JsonPath,
   Drift,
+  Drift3,
   SecretScan,
 ]);
 export type Rule = z.infer<typeof Rule>;
