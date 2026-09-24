@@ -54,9 +54,19 @@ rules:
   # --- 薄い差分原則 (完成版は120行以内目安) ---
   - id: claude-md/thin-diff
     severity: warn
-    description: CLAUDE.mdの肥大化検知(詳細はdocs/へ)
+    description: CLAUDE.mdの肥大化検知(本体行数のみ。常駐量は claude-md/import-budget)
     check: max-lines
     with: { path: CLAUDE.md, limit: 120 }
+
+  # --- 常駐量の可視化と上限 (@インポート先を含む「起動時に読み込まれる総量」) ---
+  # 注意: 旧 CLI (<= 0.4.0) は未知の check を strict スキーマで拒否するため、
+  #       本ルールを含む baseline は次期タグ (v0.6.0) 以降でのみ配布される。
+  - id: claude-md/import-budget
+    severity: warn
+    description: CLAUDE.md と @インポート先を合わせた常駐量の可視化と上限(行数だけでは軽量と判断しない)
+    check: import-budget
+    # max_chars 32000 は試行値(≒8,000 tokens 目安)。運用実績を見て調整する
+    with: { path: CLAUDE.md, max_chars: 32000 }
 
   # --- standards バージョントレーサビリティ ---
   - id: claude-md/standards-version
@@ -104,7 +114,7 @@ rules:
     with:
       # マスターは guardsmith リポジトリの standards/ サブディレクトリ。
       # loadPolicy がタグのtarballを取得・キャッシュし file: に解決してから検査する
-      source: github:novexar/guardsmith//standards@v0.5.1
+      source: github:novexar/guardsmith//standards@v0.6.0
       paths: [".claude/skills/**"]
       allow_sections: ["## PJ固有手順"]
 
@@ -122,7 +132,13 @@ rules:
     severity: error
     description: CLAUDE.md・.claude配下への資格情報混入禁止
     check: secret-scan
-    with: { paths: [CLAUDE.md, ".claude/**"] }
+    with:
+      paths:
+        - CLAUDE.md
+        - ".claude/**"
+        # Claude Code エージェントの一時 worktree(リポジトリ全体のコピーを含む)は対象外。
+        # guard 0.4.0 以降は .gitignore 追従で自動的に外れるが、旧 CLI でも効くよう明示する
+        - "!.claude/worktrees/**"
 
   - id: security/dangerous-permissions
     severity: error

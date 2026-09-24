@@ -32,7 +32,7 @@ GuardSmith は AI 開発標準を、ESLint がコードスタイルを扱うの�
 - **配布** — `guard new` が標準マスターから新規プロジェクトを展開
   (`CLAUDE.md`・agents・skills・docs・CI 設定・デザイン仕様)
 - **検証** — `guard lint` がポリシー(YAML)に基づき検査
-  (8 種の check。未初期化テンプレ、契約見出しの破壊、資格情報の混入、マスターからの乖離など)
+  (9 種の check。未初期化テンプレ、契約見出しの破壊、資格情報の混入、マスターからの乖離、CLAUDE.md の常駐量など)
 - **復元** — `guard sync` がマスターからの乖離(drift)を検出し、
   各プロジェクトが編集してよいセクションは保全したまま復元
 - **CI で強制** — [GuardSmith Lint Action](https://github.com/marketplace/actions/guardsmith-lint) が
@@ -83,12 +83,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: novexar/Guardsmith@v0.5.1
+      - uses: novexar/Guardsmith@v0.6.0
 ```
 
 | input              | 既定値                    | 説明                                                                                                  |
 | ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `cli-version`      | `0.3.0`                   | 実行する CLI の npm バージョン                                                                        |
+| `cli-version`      | `0.4.0`                   | 実行する CLI の npm バージョン                                                                        |
 | `root` / `policy`  | `.` / `guard.policy.yaml` | 検査対象 / ポリシーファイル                                                                           |
 | `upload-sarif`     | `true`                    | Code Scanning への SARIF アップロード(GHAS の無い private では `"false"`。SARIF は artifact にも残る) |
 | `pr-comment`       | `true`                    | 失敗時の PR コメント                                                                                  |
@@ -101,7 +101,7 @@ jobs:
 添付しています。必要なのは GitHub への到達と Node.js 20+ のみで、npm レジストリには一切接続しません:
 
 ```bash
-gh release download v0.5.1 --repo novexar/Guardsmith --pattern 'guardsmith-cli-*.tar.gz'
+gh release download v0.6.0 --repo novexar/Guardsmith --pattern 'guardsmith-cli-*.tar.gz'
 tar -xzf guardsmith-cli-*.tar.gz
 node guardsmith-cli/guard.mjs lint
 ```
@@ -117,9 +117,10 @@ node guardsmith-cli/guard.mjs lint
 version: 1
 target: claude-code
 extends:
-  - github:novexar/guardsmith//presets/baseline.yaml@v0.5.1
+  - github:novexar/guardsmith//presets/baseline.yaml@v0.6.0
   # フロントエンドを持つプロジェクトはさらに:
-  # - github:novexar/guardsmith//presets/frontend.yaml@v0.5.1
+  # - github:novexar/guardsmith//presets/frontend.yaml@v0.6.0
+ignore: [] # 全走査から除外する glob(extends 間で連結される)
 rules: [] # 追加・上書き(同じ id の再定義=上書き)
 exemptions: [] # 期限付き例外(reason + approved_by + expires 必須)
 ```
@@ -134,21 +135,88 @@ exemptions: [] # 期限付き例外(reason + approved_by + expires 必須)
 - 3層モデル(OSS baseline → 組織 private overlay → プロジェクト)の設計は
   [docs/LAYERING.md](docs/LAYERING.md) を参照
 
+### CLAUDE.md の常駐量(import budget)
+
+`CLAUDE.md` は `@path` インポートで他ファイルを**起動時に丸ごと**コンテキストへ展開します。
+60 行の `CLAUDE.md` でも 5 文書をインポートしていれば「薄い `CLAUDE.md`」ではありません。
+行数だけを見る `claude-md/thin-diff` ではこれを検知できないため、`import-budget` は
+起点ファイルと `@` インポートで到達する全ファイルの**常駐合計量**を測ります。
+
+```yaml
+- id: claude-md/import-budget
+  severity: warn
+  check: import-budget
+  with:
+    path: CLAUDE.md # glob 可。マッチした起点ファイルごとに1件報告
+    max_chars: 32000 # 任意。超過すると rule の severity で報告
+    max_depth: 4 # 任意。インポートを追う深さ(既定 4)
+```
+
+起点ファイルごとに必ず `info` を1件出します —
+`resident context: N files, X chars (≈Y tokens, rough estimate)` と、ファイル別内訳
+(大きい順。上位 10 件 + `others` 行)。**トークン数は `chars / 4` の粗い目安であり実測では
+ありません**。桁を掴む用途にのみ使ってください。
+常駐量に寄与しないインポートも `info` で示します: `unresolved import:`(解決できない参照)、
+`import cycle detected:`(循環)、`import depth limit exceeded`(深さ上限超過)、
+`import outside root, not measured`(走査ルート外を指す参照)。
+走査ルート外は**一切読みません**: `..`・絶対パス・`~/`・バックスラッシュを含む参照は
+ファイルアクセス前に弾き、読み込み直前に `realpath` でルート配下にあることを確認するため、
+ルート内から外を指すシンボリックリンクも計測せず報告だけします。
+
+インポートの意味論は
+[Claude Code の memory ドキュメント](https://code.claude.com/docs/en/memory)(2026-09-24 確認)
+に従います: `@path` はファイル中のどこでも有効、相対パスはそのファイルのディレクトリ基準、
+再帰は 4 hops まで、コードスパン・フェンスドコードブロック内の `@` はインポートではありません
+(取り込まずにパスを書きたいときはバッククォートで囲みます)。
+
+### 走査の対象
+
+各 check は「**コミットされうるファイル**」を対象にします:
+
+- 既定で `.gitignore`(入れ子の `.gitignore` も)に追従し、`.git/` は常に除外します
+- さらにポリシーのトップレベル `ignore`(glob)を除外します。`rules` と違い extends 間で
+  **連結**されるため、組織 overlay 側の除外が各 PJ に届きます
+- 除外対象は**走査の時点で枝刈り**します(結果フィルタではありません)。エージェント worktree や
+  `node_modules`、virtualenv を抱えるリポジトリでも実行時間が伸びません
+- `--no-gitignore` で全走査に戻せます(除外されたファイルの中身を点検したいとき)
+
+大半の check は検査対象を glob で列挙するため `.gitignore` に完全に追従します。例外は 2 種で、
+`json-path` は単一の固定パスを直接読むため非追従、`import-budget` は**起点ファイルの列挙だけ**が
+追従します(そこから辿る `@` インポートは明示参照なので、`.gitignore` 対象でも読みます):
+
+| check           | `.gitignore` 追従 | `.gitignore` 対象パスの扱い                                                                                               |
+| --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `file-exists`   | する              | **存在しない**扱い → ルールが違反を報告(リポジトリに入らないため)                                                         |
+| `file-absent`   | する              | **無い**扱い → ディスク上にあっても無検出                                                                                 |
+| `content-match` | する              | 走査対象外(対象0件は `info` として表示)                                                                                   |
+| `max-lines`     | する              | 走査対象外                                                                                                                |
+| `import-budget` | 起点のみ          | 起点として列挙されない。`@` インポートで明示参照された場合は計測対象                                                      |
+| `frontmatter`   | する              | 走査対象外                                                                                                                |
+| `drift`         | する              | マスターとの比較対象外                                                                                                    |
+| `secret-scan`   | する              | 走査対象外 — `.claude/settings.local.json` 等から検出されない                                                             |
+| `json-path`     | **しない**        | 直読みのため従来どおり発火(`.claude/settings.json` を gitignore している PJ でも `security/dangerous-permissions` は効く) |
+
+驚きやすいのは 2 つです。`.env` を `.gitignore` に入れている PJ では `file-absent` の
+`hygiene/no-env-file` が無検出になります — このルールは「`.env` をコミットさせない」ためのもので、
+`.gitignore` 対象ならコミットされ得ないため妥当な結果です。`json-path` を非追従にしているのは、
+`.claude/settings.json` をローカル管理している PJ でも設定監査を効かせ続けるためです。
+すべての check に除外ファイルも見せたい場合は `--no-gitignore` を使ってください。
+
 ## コマンド一覧
 
-| コマンド                  | 説明                                                                       |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `guard new <dir>`         | 標準マスターから新規プロジェクトを展開                                     |
-| `guard init`              | カレントに `guard.policy.yaml` を生成                                      |
-| `guard lint`              | 検査。`--format sarif\|json`、`--out <file>`、`--no-cache`、`--root <dir>` |
-| `guard sync`              | 乖離の表示(dry-run)。`--write` でマスター内容へ復元                        |
-| `guard explain <rule-id>` | ルールの意図を表示                                                         |
-| `guard version`           | CLI と標準のバージョンを表示                                               |
+| コマンド                  | 説明                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `guard new <dir>`         | 標準マスターから新規プロジェクトを展開                                                       |
+| `guard init`              | カレントに `guard.policy.yaml` を生成                                                        |
+| `guard lint`              | 検査。`--format sarif\|json`、`--out <file>`、`--no-cache`、`--no-gitignore`、`--root <dir>` |
+| `guard sync`              | 乖離の表示(dry-run)。`--write` で復元、`--no-gitignore` で全走査                             |
+| `guard explain <rule-id>` | ルールの意図を表示                                                                           |
+| `guard version`           | CLI と標準のバージョンを表示                                                                 |
 
 ## 標準のアップグレード
 
 既存プロジェクトはタグ固定のため、何もしなくても壊れません。新しい標準リリースへ追随する
-際は [docs/migration/v0.5.0.ja.md](docs/migration/v0.5.0.ja.md) のチェックリストに従ってください
+際は [docs/migration/v0.6.0.ja.md](docs/migration/v0.6.0.ja.md) のチェックリストに従ってください
 ——各項目は任意・独立で、段階適用できます。
 
 ## 謝辞・クレジット
@@ -160,7 +228,7 @@ exemptions: [] # 期限付き例外(reason + approved_by + expires 必須)
 - 標準スタックとして参照・推奨しているエコシステムへの敬意: shadcn/ui、Tremor、
   TanStack(Router/Query/Table)、Tailwind CSS、cmdk — コードの同梱はなく、
   各 PJ が各自のライセンスで導入します
-- 主要ランタイム依存: zod、yaml、fast-glob、jsonpath-plus、node-tar — 各パッケージの
+- 主要ランタイム依存: zod、yaml、fast-glob、micromatch、ignore、jsonpath-plus、node-tar — 各パッケージの
   ライセンスに基づき利用(オフラインバンドルには `THIRD-PARTY-NOTICES.md` を同梱)
 
 ## ライセンス・コントリビュート
