@@ -42,7 +42,7 @@ rules:
 version: 1
 target: claude-code
 extends:
-  - github:novexar/guardsmith//presets/baseline.yaml@v0.6.0 # ← inherits Layer 1
+  - github:novexar/guardsmith//presets/baseline.yaml@v0.7.1 # ← inherits Layer 1
 rules:
   # Override: escalate the violation to error in-house (redefining the same id = override)
   - id: claude-md/thin-diff
@@ -111,9 +111,11 @@ Not only rules — templates work the same way:
 ## Operational flow
 
 1. Revise the standards → commit to Layer 1 (or 2) and cut a new tag (e.g. v0.3.0)
-2. In each project run `guard sync` (dry-run) and then `guard bump <tag>`: the `extends`
-   tags in guard.policy.yaml, the standards files themselves and `guardsmith.vars.yaml`
-   move to the new tag in one command. Open the result as a PR
+2. In each project run `guard bump <tag> --dry-run` to review the diff and the predicted
+   conflicts, then `guard bump <tag>`: the `extends` tags in guard.policy.yaml, the
+   standards files themselves and `guardsmith.vars.yaml` move to the new tag in one
+   command. Open the result as a PR. (`guard sync` without `--write` is a dry-run against
+   the tag the policy **currently** pins, so it does not preview the bump)
 3. `guard lint` in CI verifies conformance to the new standards; places that cannot
    conform yet are grace-managed with time-boxed exemptions
 
@@ -123,7 +125,7 @@ Not only rules — templates work the same way:
   - When `//path` is omitted: extends refers to `guard.policy.yaml` at the repository
     root, drift refers to the repository root
   - Specify drift's `//path` when the master lives in a subdirectory
-    (e.g. `github:novexar/guardsmith//standards@v0.6.0`)
+    (e.g. `github:novexar/guardsmith//standards@v0.7.1`)
 - Fetch method: tarball from codeload.github.com (tag-pinned). Private repositories
   authenticate via the `GITHUB_TOKEN` environment variable
 - Cache: `~/.guardsmith/cache/<owner>/<repo>/<tag>/`. Tags are assumed immutable, so no
